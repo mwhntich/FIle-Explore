@@ -442,11 +442,13 @@ function bindContent(content, which) {
     state.focused = which;
     const model = pane(which); if (!event.ctrlKey) clearSelection(which);
     const rect = content.getBoundingClientRect(); const startX = event.clientX - rect.left + content.scrollLeft, startY = event.clientY - rect.top + content.scrollTop;
-    const overlay = document.createElement('div'); overlay.className = 'marquee'; content.append(overlay);
+    // Place the selection box at the click point and keep it hidden until the mouse moves, so it never adds height and triggers a scrollbar.
+    const overlay = document.createElement('div'); overlay.className = 'marquee'; overlay.hidden = true;
+    overlay.style.left = `${startX}px`; overlay.style.top = `${startY}px`; content.append(overlay);
     const original = new Set(model.selected); let moved = false;
     const move = point => {
       const x = point.clientX - rect.left + content.scrollLeft, y = point.clientY - rect.top + content.scrollTop;
-      if (Math.abs(x - startX) + Math.abs(y - startY) > 5) moved = true;
+      if (Math.abs(x - startX) + Math.abs(y - startY) > 5) { moved = true; overlay.hidden = false; }
       overlay.style.left = `${Math.min(x, startX)}px`; overlay.style.top = `${Math.min(y, startY)}px`;
       overlay.style.width = `${Math.abs(x - startX)}px`; overlay.style.height = `${Math.abs(y - startY)}px`;
       if (!moved) return;
