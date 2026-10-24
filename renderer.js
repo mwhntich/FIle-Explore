@@ -534,13 +534,18 @@ function showItemMenu(x, y, item, which) {
       { icon: 'cut', label: 'Cut', run: () => cutCopy(true) },
       { icon: 'copy', label: 'Copy', run: () => cutCopy(false) },
       { icon: 'rename', label: 'Rename', run: renameSelected },
+      { icon: 'copy', label: 'Copy path', run: () => copyText([...pane(which).selected].join('\r\n'), 'Path copied.') },
       { icon: 'trash', label: 'Move to Recycle Bin', run: () => deleteSelected(false) },
       { icon: 'trash', label: 'Delete permanently', run: () => deleteSelected(true) }
     ])
   ]);
 }
+function copyText(text, message) {
+  navigator.clipboard.writeText(text).then(() => toast(message)).catch(() => toast('Could not copy.'));
+}
 function showEmptyMenu(x, y, which) {
   showMenu(x, y, [
+    ...(isHome(currentPath(which)) ? [] : [{ icon: 'copy', label: 'Copy folder path', run: () => copyText(currentPath(which), 'Path copied.') }]),
     { icon: 'folder', label: 'New folder', run: newFolder },
     { icon: 'paste', label: 'Paste', run: paste },
     { icon: 'refresh', label: 'Refresh', run: refreshAll },
@@ -623,7 +628,8 @@ function bindControls() {
   window.slate.onNav(direction => navigateHistory(direction));
   for (const which of ['primary', 'secondary']) $(`${which}-heading`).onpointerdown = event => { if (event.button === 0 && !event.ctrlKey) { state.focused = which; clearSelection(which); } };
   $('statusbar').onpointerdown = event => { if (event.button === 0) clearSelection(state.focused); }; $('up').onclick = goUp; $('refresh').onclick = refreshAll;
-  $('address-wrap').ondblclick = () => showAddress();
+  // Like Explorer: click any empty part of the address bar (not a folder name) to type, paste, or copy a path.
+  $('address-wrap').onclick = event => { if (event.target.closest('.crumb') || !$('address').hidden) return; showAddress(); };
   $('address').onkeydown = event => { if (event.key === 'Enter') { const path = event.target.value.trim(); hideAddress(); if (path) load(state.focused, path); } if (event.key === 'Escape') hideAddress(); };
   $('address').onblur = hideAddress;
   $('search').oninput = render;
