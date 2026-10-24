@@ -1,6 +1,6 @@
 {
   "name": "files-independent",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "An independent tabbed Windows file manager",
   "main": "main.js",
   "author": "Files Independent",

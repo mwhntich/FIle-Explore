@@ -22,7 +22,7 @@ try {
     Copy-Item -LiteralPath (Join-Path $project 'assets\icon.ico') -Destination (Join-Path $app 'assets') -Force
     Rename-Item -LiteralPath (Join-Path $stage 'electron.exe') -NewName 'Files.exe'
     Rename-Item -LiteralPath (Join-Path $stage 'electron_wer.dll') -NewName 'Files_wer.dll'
-    & (Join-Path $vendor 'rcedit.exe') (Join-Path $stage 'Files.exe') --set-icon (Join-Path $project 'assets\icon.ico') --set-version-string ProductName 'Files' --set-version-string FileDescription 'Files - independent file manager' --set-file-version '1.0.0' --set-product-version '1.0.0'
+    & (Join-Path $vendor 'rcedit.exe') (Join-Path $stage 'Files.exe') --set-icon (Join-Path $project 'assets\icon.ico') --set-version-string ProductName 'Files' --set-version-string FileDescription 'Files - independent file manager' --set-file-version '1.1.0' --set-product-version '1.1.0'
     if ($LASTEXITCODE -ne 0) { throw 'Could not apply the app icon.' }
     $uninstaller = Join-Path $stage 'Uninstall Files.exe'
     & $compiler /nologo /target:winexe /optimize+ ('/out:'+$uninstaller) ('/win32icon:'+(Join-Path $project 'assets\icon.ico')) /r:System.Windows.Forms.dll (Join-Path $project 'installer\Uninstall.cs')
@@ -31,7 +31,7 @@ try {
     try { & (Join-Path $vendor '7z.exe') a -tzip -mx=5 $payload '.\*' }
     finally { Pop-Location }
     if ($LASTEXITCODE -ne 0) { throw 'Could not package the app.' }
-    $setup = Join-Path $output 'Files-Setup-1.0.0.exe'
+    $setup = Join-Path $output 'Files-Setup-1.1.0.exe'
     & $compiler /nologo /target:winexe /optimize+ ('/out:'+$setup) ('/win32icon:'+(Join-Path $project 'assets\icon.ico')) /r:System.Windows.Forms.dll /r:System.Drawing.dll /r:System.Core.dll /r:System.IO.Compression.dll /r:System.IO.Compression.FileSystem.dll ('/resource:'+$payload+',FilesPayload') (Join-Path $project 'installer\Setup.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Could not compile the installer.' }
     Write-Output "Created $setup"

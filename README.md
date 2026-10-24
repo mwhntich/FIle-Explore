@@ -6,7 +6,7 @@ A tabbed file explorer for Windows 10/11 that works with shared files and folder
 
 ## Install
 
-Download `Files-Setup-1.0.0.exe` from [Releases](../../releases) and run it. The installer is unsigned, so Windows SmartScreen may ask you to confirm.
+Download `Files-Setup-1.1.0.exe` from [Releases](../../releases) and run it. The installer is unsigned, so Windows SmartScreen may ask you to confirm.
 
 Files is an independently built Windows file manager inspired by the general layout of Files v2. It does not include code from the official Files project. Its app icon was supplied by the user. It targets 64-bit Windows 10 and 11.
 

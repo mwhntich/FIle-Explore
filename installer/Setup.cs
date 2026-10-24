@@ -89,7 +89,7 @@ internal static class SetupProgram
                 }
             }
             if (!File.Exists(Path.Combine(temporary, "Files.exe"))) throw new InvalidOperationException("Installer payload is incomplete.");
-            File.WriteAllText(Path.Combine(temporary, Marker), "Files independent build 1.0.0");
+            File.WriteAllText(Path.Combine(temporary, Marker), "Files independent build 1.1.0");
             if (Directory.Exists(target)) { Directory.Move(target, backup); oldMoved = true; }
             Directory.Move(temporary, target);
             if (oldMoved) { try { Directory.Delete(backup, true); } catch { } }
@@ -105,7 +105,7 @@ internal static class SetupProgram
                 using (RegistryKey key = Registry.CurrentUser.CreateSubKey(@"Software\Microsoft\Windows\CurrentVersion\Uninstall\FilesIndependent"))
                 {
                     key.SetValue("DisplayName", "Files (Independent build)");
-                    key.SetValue("DisplayVersion", "1.0.0");
+                    key.SetValue("DisplayVersion", "1.1.0");
                     key.SetValue("Publisher", "Files Independent");
                     key.SetValue("DisplayIcon", Path.Combine(target, "Files.exe"));
                     key.SetValue("InstallLocation", target);
