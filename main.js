@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, shell, nativeTheme, net, protocol } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell, nativeTheme, nativeImage, net, protocol } = require('electron');
 const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
@@ -64,12 +64,13 @@ async function listDirectory(folder) {
 async function drives() {
   if (process.platform !== 'win32') return [{ name: 'Home', path: os.homedir() }];
   try {
-    const script = 'Get-CimInstance Win32_LogicalDisk | Select-Object DeviceID,VolumeName,DriveType | ConvertTo-Json -Compress';
+    const script = 'Get-CimInstance Win32_LogicalDisk | Select-Object DeviceID,VolumeName,DriveType,Size,FreeSpace,ProviderName | ConvertTo-Json -Compress';
     const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 10000 });
     const parsed = JSON.parse(stdout);
     return (Array.isArray(parsed) ? parsed : [parsed]).filter(x => x && x.DeviceID).map(x => ({
       name: x.VolumeName || (x.DriveType === 4 ? 'Network drive' : x.DeviceID === 'C:' ? 'Windows' : 'Local drive'),
-      path: `${x.DeviceID}\\`, network: x.DriveType === 4
+      path: `${x.DeviceID}\\`, network: x.DriveType === 4,
+      size: typeof x.Size === 'number' ? x.Size : null, free: typeof x.FreeSpace === 'number' ? x.FreeSpace : null, provider: x.ProviderName || ''
     }));
   } catch {
     return 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('').filter(letter => fs.existsSync(`${letter}:\\`)).map(letter => ({ name: letter === 'C' ? 'Windows' : 'Drive', path: `${letter}:\\` }));
@@ -158,13 +159,35 @@ ipcMain.handle('trash', async (_, paths) => {
   }
   return results;
 });
-ipcMain.handle('remove', async (_, paths) => {
-  const results = [];
-  for (const file of paths) {
-    try { await fsp.rm(file, { recursive: true, force: false, maxRetries: 2 }); results.push({ file, ok: true }); }
-    catch (error) { results.push({ file, ok: false, error: errorMessage(error) }); }
+async function removeOne(file) {
+  const stat = await fsp.lstat(file);
+  if (stat.isDirectory() && process.platform === 'win32') {
+    // Windows' own rd is far faster than walking the tree from Node, especially on network shares.
+    try { await execFileAsync('cmd.exe', ['/d', '/c', 'rd', '/s', '/q', file], { windowsHide: true }); } catch {}
+    if (!fs.existsSync(file)) return;
   }
+  await fsp.rm(file, { recursive: true, force: false, maxRetries: 2 });
+}
+ipcMain.handle('remove', async (_, paths) => {
+  // Delete several items at once; network round trips dominate, so parallel work is much faster than one by one.
+  const results = new Array(paths.length); let next = 0;
+  const worker = async () => {
+    while (next < paths.length) {
+      const index = next++; const file = paths[index];
+      try { await removeOne(file); results[index] = { file, ok: true }; }
+      catch (error) { results[index] = { file, ok: false, error: errorMessage(error) }; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(8, paths.length) }, worker));
   return results;
+});
+ipcMain.handle('start-drag', async (event, paths) => {
+  const files = paths.filter(file => fs.existsSync(file));
+  if (!files.length) return;
+  let icon = null;
+  try { icon = await app.getFileIcon(files[0], { size: 'normal' }); } catch {}
+  if (!icon || icon.isEmpty()) icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.ico')).resize({ width: 32, height: 32 });
+  event.sender.startDrag({ file: files[0], files, icon });
 });
 ipcMain.handle('window', (_, action) => {
   if (!window) return;

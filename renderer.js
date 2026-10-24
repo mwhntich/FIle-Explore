@@ -2,11 +2,19 @@ const $ = id => document.getElementById(id);
 const icon = name => `<svg><use href="#i-${name}"/></svg>`;
 const state = { tabs: [], closed: [], active: null, nextId: 1, secondary: { path: '', items: [], selected: new Set(), anchor: -1, history: [], at: -1 }, split: false, focused: 'primary', view: 'grid', sort: 'name', clipboard: null, home: null, drives: [], menu: null };
 
+// Virtual "Home" location: quick folders and all drives, like This PC.
+const HOME = '::home';
 function tab() { return state.tabs.find(x => x.id === state.active); }
 function pane(which = state.focused) { return which === 'primary' ? tab() : state.secondary; }
-function currentPath(which = state.focused) { return pane(which)?.path || state.home?.root || ''; }
+function currentPath(which = state.focused) { return pane(which)?.path || HOME; }
+function isHome(file) { return file === HOME; }
+function homeItems() {
+  const folders = state.home.folders.map(x => ({ name: x.name, path: x.path, directory: true, kind: 'folder', section: 'folders' }));
+  const drives = state.drives.map(x => ({ name: `${x.name} (${x.path.slice(0, 2)})`, path: x.path, directory: true, kind: 'drive', section: 'drives', size: x.size ?? null, free: x.free ?? null, network: !!x.network, provider: x.provider || '' }));
+  return [...folders, ...drives];
+}
 function nameOf(file) {
-  if (!file) return 'Home';
+  if (!file || isHome(file)) return 'Home';
   const value = file.replace(/[\\/]$/, '');
   const slash = Math.max(value.lastIndexOf('\\'), value.lastIndexOf('/'));
   if (slash < 0) return value;
@@ -26,6 +34,7 @@ function visibleItems(which) {
   const source = pane(which)?.items || [];
   const query = $('search').value.trim().toLowerCase();
   const filtered = which === state.focused && query ? source.filter(x => x.name.toLowerCase().includes(query)) : [...source];
+  if (isHome(pane(which)?.path)) return filtered;
   if (state.sort === 'date') filtered.sort((a, b) => Number(b.directory) - Number(a.directory) || b.modified - a.modified);
   if (state.sort === 'type') filtered.sort((a, b) => Number(b.directory) - Number(a.directory) || a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
   return filtered;
@@ -44,7 +53,7 @@ async function load(which, target, remember = true) {
   if (!model) return;
   const sequence = model.sequence = (model.sequence || 0) + 1;
   try {
-    const result = await window.slate.list(target);
+    const result = isHome(target) ? { path: HOME, items: homeItems() } : await window.slate.list(target);
     if (model.sequence !== sequence) return;
     if (remember && !samePath(model.path, result.path)) {
       model.history = model.history.slice(0, model.at + 1);
@@ -57,7 +66,7 @@ async function load(which, target, remember = true) {
 }
 function newTab(target, activate = true) {
   const id = state.nextId++;
-  const folder = target || state.home.root;
+  const folder = target || HOME;
   state.tabs.push({ id, path: '', items: [], selected: new Set(), anchor: -1, history: [], at: -1 });
   if (activate) { state.active = id; state.focused = 'primary'; $('search').value = ''; }
   load('primary', folder);
@@ -71,7 +80,7 @@ function switchTab(id) {
 function closeTab(id = state.active) {
   const index = state.tabs.findIndex(x => x.id === id);
   if (index < 0) return;
-  state.closed.push(state.tabs[index].path || state.home.root);
+  state.closed.push(state.tabs[index].path || HOME);
   state.tabs.splice(index, 1);
   if (!state.tabs.length) { window.slate.window('close'); return; }
   if (state.active === id) { state.active = state.tabs[Math.min(index, state.tabs.length - 1)].id; state.focused = 'primary'; }
@@ -87,8 +96,8 @@ function renderTabs() {
     const button = document.createElement('button');
     button.className = `tab ${model.id === state.active ? 'active' : ''}`; button.dataset.tabId = model.id;
     button.title = model.path || 'Home';
-    button.innerHTML = `${icon(model.path && samePath(model.path, state.home.root) ? 'home' : 'folder')}<span class="tab-title"></span><span class="tab-close" title="Close tab">×</span>`;
-    button.querySelector('.tab-title').textContent = model.path && samePath(model.path, state.home.root) ? 'Home' : nameOf(model.path);
+    button.innerHTML = `${icon(isHome(model.path) ? 'home' : 'folder')}<span class="tab-title"></span><span class="tab-close" title="Close tab">×</span>`;
+    button.querySelector('.tab-title').textContent = nameOf(model.path);
     button.onclick = event => { if (event.target.closest('.tab-close')) closeTab(model.id); else switchTab(model.id); };
     button.onauxclick = event => { if (event.button === 1) closeTab(model.id); };
     button.ondragover = event => { event.preventDefault(); clearTimeout(button.hoverTimer); button.hoverTimer = setTimeout(() => switchTab(model.id), 650); };
@@ -99,7 +108,7 @@ function renderTabs() {
 }
 function renderSidebar() {
   const top = $('sidebar-top'); top.replaceChildren();
-  const home = sidebarRow('Home', state.home.root, 'home', true); top.append(home);
+  const home = sidebarRow('Home', HOME, 'home', true); top.append(home);
   const list = $('sidebar-scroll'); list.replaceChildren();
   section('Pinned');
   for (const folder of state.home.folders) list.append(sidebarRow(folder.name, folder.path, folder.name === 'Desktop' ? 'home' : 'folder'));
@@ -110,12 +119,12 @@ function renderSidebar() {
   network.onclick = () => showAddress('\\\\'); list.append(network);
   function section(title) { const header = document.createElement('div'); header.className = 'sidebar-section'; header.textContent = title; list.append(header); }
 }
-function sidebarRow(label, target, symbol, isHome = false) {
+function sidebarRow(label, target, symbol, homeRow = false) {
   const button = document.createElement('button');
   button.className = `sidebar-row ${samePath(currentPath('primary'), target) ? 'active' : ''}`;
-  button.innerHTML = `${icon(symbol)}<span class="row-name"></span>${!isHome && symbol === 'folder' ? '<span class="row-tail">♢</span>' : ''}`;
+  button.innerHTML = `${icon(symbol)}<span class="row-name"></span>${!homeRow && symbol === 'folder' ? '<span class="row-tail">♢</span>' : ''}`;
   button.querySelector('.row-name').textContent = label;
-  button.title = target; button.dataset.dropPath = target;
+  button.title = isHome(target) ? 'Home' : target; if (!isHome(target)) button.dataset.dropPath = target;
   button.onclick = event => { if (event.ctrlKey) newTab(target); else load('primary', target); };
   button.onauxclick = event => { if (event.button === 1) newTab(target); };
   button.ondragover = event => event.preventDefault();
@@ -137,7 +146,8 @@ function breadcrumbs(folder) {
     let built = root;
     for (const part of rest) { built += (built.endsWith('\\') ? '' : '\\') + part; segments.push({ label: part, path: built }); }
   } else segments.push({ label: folder, path: folder });
-  const home = document.createElement('button'); home.className = 'crumb home'; home.innerHTML = icon('home'); home.title = state.home.root; home.onclick = () => load(state.focused, state.home.root); element.append(home);
+  const home = document.createElement('button'); home.className = 'crumb home'; home.innerHTML = icon('home'); home.title = 'Home'; home.onclick = () => load(state.focused, HOME); element.append(home);
+  if (isHome(folder)) { const divider = document.createElement('span'); divider.className = 'crumb-divider'; divider.textContent = '›'; const label = document.createElement('button'); label.className = 'crumb'; label.textContent = 'Home'; element.append(divider, label); return; }
   for (const segment of segments) {
     const divider = document.createElement('span'); divider.className = 'crumb-divider'; divider.textContent = '›'; element.append(divider);
     const button = document.createElement('button'); button.className = 'crumb'; button.textContent = segment.label; button.title = segment.path; button.onclick = () => load(state.focused, segment.path); element.append(button);
@@ -145,7 +155,7 @@ function breadcrumbs(folder) {
 }
 function showAddress(initial) {
   $('breadcrumbs').hidden = true; $('address').hidden = false;
-  $('address').value = initial === undefined ? currentPath() : initial;
+  $('address').value = initial === undefined ? (isHome(currentPath()) ? '' : currentPath()) : initial;
   $('address').focus(); $('address').select();
 }
 function hideAddress() { $('address').hidden = true; $('breadcrumbs').hidden = false; }
@@ -173,12 +183,13 @@ function renderPane(which) {
   const model = pane(which); if (!model) return;
   const heading = $(`${which}-heading`); const content = $(`${which}-content`);
   heading.replaceChildren();
-  const pathText = document.createElement('span'); pathText.className = 'small-path'; pathText.textContent = model.path || '';
+  const pathText = document.createElement('span'); pathText.className = 'small-path'; pathText.textContent = isHome(model.path) ? 'Home' : model.path || '';
   const count = document.createElement('span'); count.textContent = `${model.items.length} items`;
   heading.append(pathText, count);
   content.replaceChildren();
   const items = visibleItems(which);
   if (!items.length) { const empty = document.createElement('div'); empty.className = 'empty'; empty.innerHTML = `${icon('folder')}<strong>${$('search').value ? 'No matching items' : 'This folder is empty'}</strong><span>${$('search').value ? 'Try another search.' : 'Drop files here or create a folder.'}</span>`; content.append(empty); }
+  else if (isHome(model.path)) renderHome(content, items, which);
   else if (state.view === 'grid') {
     const grid = document.createElement('div'); grid.className = 'file-grid';
     items.forEach((item, index) => {
@@ -201,6 +212,42 @@ function renderPane(which) {
   }
   bindContent(content, which);
 }
+function renderHome(content, items, which) {
+  const view = document.createElement('div'); view.className = 'home-view';
+  for (const [section, title] of [['folders', 'Folders'], ['drives', 'Drives']]) {
+    const entries = items.map((item, index) => ({ item, index })).filter(x => x.item.section === section);
+    if (!entries.length) continue;
+    const heading = document.createElement('h3'); heading.className = 'home-heading'; heading.textContent = title; view.append(heading);
+    const grid = document.createElement('div'); grid.className = section === 'drives' ? 'drive-grid' : 'file-grid home-folders';
+    for (const { item, index } of entries) {
+      const model = pane(which);
+      const card = document.createElement('div'); card.dataset.path = item.path; card.dataset.directory = '1';
+      if (section === 'drives') {
+        card.className = `drive-card ${model.selected.has(item.path) ? 'selected' : ''}`;
+        const used = item.size ? Math.min(1, Math.max(0, (item.size - item.free) / item.size)) : 0;
+        card.innerHTML = `<div class="drive-icon ${item.network ? 'network' : ''}">${icon('drive')}</div><div class="drive-info"><span class="drive-name"></span><div class="drive-bar"><span></span></div><span class="drive-space"></span></div>`;
+        card.querySelector('.drive-name').textContent = item.name;
+        card.querySelector('.drive-bar span').style.width = `${Math.round(used * 100)}%`;
+        card.querySelector('.drive-bar').classList.toggle('full', used > 0.9);
+        card.querySelector('.drive-space').textContent = item.size ? `${formatSize(item.free)} free of ${formatSize(item.size)}` : item.provider || (item.network ? 'Network drive' : '');
+        card.title = item.provider ? `${item.path}  —  ${item.provider}` : item.path;
+      } else {
+        card.className = `file-card ${model.selected.has(item.path) ? 'selected' : ''}`;
+        card.append(itemIcon(item));
+        const label = document.createElement('span'); label.className = 'file-name'; label.textContent = item.name; card.append(label);
+      }
+      bindItem(card, item, index, which); grid.append(card);
+    }
+    view.append(grid);
+  }
+  content.append(view);
+}
+function goUp() {
+  const folder = currentPath(); if (isHome(folder)) return;
+  const parent = parentOf(folder);
+  load(state.focused, samePath(parent, folder) ? HOME : parent);
+}
+function inFolder(action) { if (isHome(currentPath())) { toast(`Open a folder or drive to ${action}.`); return false; } return true; }
 function selectItem(item, index, which, event) {
   const model = pane(which); const items = visibleItems(which);
   if (event.shiftKey && model.anchor >= 0) {
@@ -211,12 +258,12 @@ function selectItem(item, index, which, event) {
     model.selected.has(item.path) ? model.selected.delete(item.path) : model.selected.add(item.path);
     model.anchor = index;
   } else { model.selected = new Set([item.path]); model.anchor = index; }
-  state.focused = which; render();
+  state.focused = which; paintSelection();
 }
 function bindItem(element, item, index, which) {
   element.onclick = event => { event.stopPropagation(); if (state.suppressClick) return; selectItem(item, index, which, event); };
   element.ondblclick = event => { event.stopPropagation(); item.directory ? load(which, item.path) : window.slate.open(item.path).then(error => { if (error) toast(error); }); };
-  element.oncontextmenu = event => { event.preventDefault(); event.stopPropagation(); const model = pane(which); if (!model.selected.has(item.path)) { model.selected = new Set([item.path]); state.focused = which; render(); } showItemMenu(event.clientX, event.clientY, item, which); };
+  element.oncontextmenu = event => { event.preventDefault(); event.stopPropagation(); const model = pane(which); if (!model.selected.has(item.path)) { model.selected = new Set([item.path]); state.focused = which; paintSelection(); } showItemMenu(event.clientX, event.clientY, item, which); };
   element.onpointerdown = event => { if (event.button === 0) startItemDrag(event, item, index, which); };
   // Native drag events are only used for files dropped in from Windows Explorer.
   element.ondragover = event => { if (!item.directory) return; event.preventDefault(); event.stopPropagation(); element.classList.add('drop-target'); event.dataTransfer.dropEffect = 'copy'; };
@@ -225,6 +272,7 @@ function bindItem(element, item, index, which) {
 }
 // Internal drag and drop runs on pointer events instead of HTML5 drag, which is unreliable in a frameless window on Windows.
 function startItemDrag(event, item, index, which) {
+  if (isHome(pane(which)?.path)) return; // Home shows shortcuts to folders and drives; they aren't moved by dragging.
   const startX = event.clientX, startY = event.clientY;
   let drag = null;
   const clearTarget = () => { document.querySelectorAll('.drop-target').forEach(x => x.classList.remove('drop-target')); };
@@ -245,7 +293,13 @@ function startItemDrag(event, item, index, which) {
       ghost.textContent = files.length === 1 ? nameOf(files[0]) : `${files.length} items`;
       document.body.append(ghost); document.body.classList.add('dragging');
       drag = state.dragging = { files, which, ghost, target: null, tabTimer: null };
-      render();
+      paintSelection();
+    }
+    if (point.clientX <= 0 || point.clientY <= 0 || point.clientX >= innerWidth - 1 || point.clientY >= innerHeight - 1) {
+      // Leaving the window: hand the files to Windows so they can be dropped in Explorer, the desktop, or other apps.
+      const files = drag.files; finish(); state.outgoing = files;
+      window.slate.startDrag(files).catch(error => toast(error.message)).finally(() => { setTimeout(() => { state.outgoing = null; refreshAll(); }, 400); });
+      return;
     }
     drag.ghost.style.transform = `translate(${point.clientX + 14}px, ${point.clientY + 14}px)`;
     drag.ghost.dataset.mode = dropMove(drag.files, dropTargetAt(point.clientX, point.clientY)?.path, point.ctrlKey, point.shiftKey) ? 'Move' : 'Copy';
@@ -263,6 +317,7 @@ function startItemDrag(event, item, index, which) {
     if (current && target) transferItems(current.files, target.path, dropMove(current.files, target.path, point.ctrlKey, point.shiftKey));
   };
   const cancelKey = key => { if (key.key === 'Escape') { key.preventDefault(); key.stopPropagation(); finish(); } };
+  try { event.currentTarget.setPointerCapture(event.pointerId); } catch {}
   window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('keydown', cancelKey, true);
 }
 function dropTargetAt(x, y) {
@@ -275,7 +330,7 @@ function dropTargetAt(x, y) {
   const sidebarRow = element.closest('.sidebar-row[data-drop-path]');
   if (sidebarRow) return { element: sidebarRow, path: sidebarRow.dataset.dropPath };
   const content = element.closest('.file-pane');
-  if (content) { const which = content.dataset.pane; const folder = currentPath(which); return folder ? { element: content, path: folder } : null; }
+  if (content) { const which = content.dataset.pane; const folder = currentPath(which); return folder && !isHome(folder) ? { element: content, path: folder } : null; }
   return null;
 }
 function sameVolume(a, b) {
@@ -289,6 +344,7 @@ function dropMove(files, destination, ctrl, shift) {
   return files.every(file => sameVolume(file, destination));
 }
 async function transferItems(files, destination, move) {
+  if (!destination || isHome(destination)) { toast('Drop onto a folder or drive.'); return; }
   try { reportResults(await window.slate.transfer(files, destination, move), move ? 'Moved' : 'Copied'); await refreshAll(); }
   catch (error) { toast(error.message); }
 }
@@ -329,7 +385,9 @@ function bindContent(content, which) {
 async function handleDrop(event, destination) {
   const files = [...event.dataTransfer.files].map(file => window.slate.pathForFile(file)).filter(Boolean);
   if (!files.length || !destination) return;
-  await transferItems(files, destination, event.shiftKey);
+  // Our own items dragged out of the window and back in keep the normal move/copy rules.
+  const own = state.outgoing && files.every(file => state.outgoing.some(x => samePath(x, file)));
+  await transferItems(files, destination, own ? dropMove(files, destination, event.ctrlKey, event.shiftKey) : event.shiftKey);
 }
 function renderStatus() {
   const model = pane(); if (!model) return;
@@ -337,6 +395,17 @@ function renderStatus() {
   $('statusbar').innerHTML = `<span>${total} item${total === 1 ? '' : 's'}</span>${selected ? `<span>${selected} selected</span><span>${formatSize(bytes)}</span>` : ''}`;
   for (const id of ['cut', 'copy', 'rename', 'delete']) $(id).disabled = selected === 0 || ((id === 'rename') && selected !== 1);
   $('paste').disabled = !state.clipboard?.paths?.length;
+}
+// Repaint selection only, without rebuilding the file list (rebuilding reloads thumbnails, which is slow on network drives).
+function paintSelection() {
+  for (const which of ['primary', 'secondary']) {
+    const model = pane(which); if (!model) continue;
+    document.querySelectorAll(`#${which}-content [data-path]`).forEach(x => x.classList.toggle('selected', model.selected.has(x.dataset.path)));
+  }
+  document.querySelectorAll('.file-pane').forEach(x => x.classList.toggle('focused', x.dataset.pane === state.focused));
+  breadcrumbs(currentPath());
+  const model = pane(); $('back').disabled = model.at <= 0; $('forward').disabled = model.at >= model.history.length - 1;
+  renderStatus();
 }
 function render() {
   if (!tab()) return;
@@ -350,6 +419,7 @@ function render() {
   renderStatus();
 }
 async function refreshAll() {
+  if (isHome(currentPath('primary')) || (state.split && isHome(currentPath('secondary')))) state.drives = await window.slate.drives();
   const tasks = [load('primary', currentPath('primary'), false)];
   if (state.split) tasks.push(load('secondary', currentPath('secondary'), false));
   await Promise.all(tasks);
@@ -378,12 +448,14 @@ function showItemMenu(x, y, item, which) {
   showMenu(x, y, [
     { icon: 'folder', label: 'Open', run: () => item.directory ? load(which, item.path) : window.slate.open(item.path) },
     ...(item.directory ? [{ icon: 'plus', label: 'Open in new tab', run: () => newTab(item.path) }, { icon: 'split', label: 'Open in new pane', run: () => { state.split = true; load('secondary', item.path); state.focused = 'secondary'; } }] : []),
-    null,
-    { icon: 'cut', label: 'Cut', run: () => cutCopy(true) },
-    { icon: 'copy', label: 'Copy', run: () => cutCopy(false) },
-    { icon: 'rename', label: 'Rename', run: renameSelected },
-    { icon: 'trash', label: 'Move to Recycle Bin', run: () => deleteSelected(false) },
-    { icon: 'trash', label: 'Delete permanently', run: () => deleteSelected(true) }
+    ...(isHome(pane(which)?.path) ? [] : [
+      null,
+      { icon: 'cut', label: 'Cut', run: () => cutCopy(true) },
+      { icon: 'copy', label: 'Copy', run: () => cutCopy(false) },
+      { icon: 'rename', label: 'Rename', run: renameSelected },
+      { icon: 'trash', label: 'Move to Recycle Bin', run: () => deleteSelected(false) },
+      { icon: 'trash', label: 'Delete permanently', run: () => deleteSelected(true) }
+    ])
   ]);
 }
 function showEmptyMenu(x, y, which) {
@@ -405,8 +477,9 @@ function modal(title, description, initial, confirm, callback) {
   $('modal-confirm').onclick = () => finish(true); $('modal-cancel').onclick = () => finish(false);
   $('modal-input').onkeydown = event => { if (event.key === 'Enter') finish(true); if (event.key === 'Escape') finish(false); };
 }
-function newFolder() { modal('New folder', 'Create a folder in the current location.', 'New folder', 'Create', name => window.slate.mkdir(currentPath(), name)); }
+function newFolder() { if (!inFolder('create a folder')) return; modal('New folder', 'Create a folder in the current location.', 'New folder', 'Create', name => window.slate.mkdir(currentPath(), name)); }
 function renameSelected() {
+  if (isHome(currentPath())) return;
   const file = [...pane().selected][0]; if (!file || pane().selected.size !== 1) return;
   modal('Rename', 'Enter a new name for this item.', nameOf(file), 'Rename', name => window.slate.rename(file, name));
 }
@@ -420,11 +493,16 @@ function confirmDialog(title, description, confirmLabel) {
     $('modal-confirm').onclick = () => done(true); $('modal-cancel').onclick = () => done(false);
   });
 }
+function isNetworkPath(file) {
+  if (file.startsWith('\\\\')) return true;
+  return state.drives.some(drive => drive.network && drive.path.slice(0, 2).toLowerCase() === file.slice(0, 2).toLowerCase());
+}
 async function deleteSelected(permanent = false) {
+  if (isHome(currentPath())) return;
   const model = pane(); const files = [...model.selected]; if (!files.length) return;
   try {
     let remaining = files; let trashed = [];
-    if (!permanent) {
+    if (!permanent && !files.some(isNetworkPath)) {
       trashed = await window.slate.trash(files);
       remaining = trashed.filter(x => !x.ok).map(x => x.file);
       trashed = trashed.filter(x => x.ok);
@@ -441,9 +519,9 @@ async function deleteSelected(permanent = false) {
     model.selected.clear(); await refreshAll();
   } catch (error) { toast(error.message); }
 }
-function cutCopy(cut) { const files = [...pane().selected]; if (!files.length) return; state.clipboard = { paths: files, cut }; toast(`${cut ? 'Cut' : 'Copied'} ${files.length} item(s).`); renderStatus(); }
+function cutCopy(cut) { if (cut && isHome(currentPath())) return; const files = [...pane().selected]; if (!files.length) return; state.clipboard = { paths: files, cut }; toast(`${cut ? 'Cut' : 'Copied'} ${files.length} item(s).`); renderStatus(); }
 async function paste() {
-  if (!state.clipboard?.paths?.length) return;
+  if (!state.clipboard?.paths?.length || !inFolder('paste')) return;
   const clip = state.clipboard;
   try {
     const result = await window.slate.transfer(clip.paths, currentPath(), clip.cut); reportResults(result, clip.cut ? 'Moved' : 'Copied');
@@ -463,7 +541,7 @@ function bindControls() {
   document.addEventListener('mouseup', event => { if (event.button === 3 || event.button === 4) { event.preventDefault(); navigateHistory(event.button === 3 ? -1 : 1); } });
   window.slate.onNav(direction => navigateHistory(direction));
   for (const which of ['primary', 'secondary']) $(`${which}-heading`).onpointerdown = event => { if (event.button === 0 && !event.ctrlKey) { state.focused = which; clearSelection(which); } };
-  $('statusbar').onpointerdown = event => { if (event.button === 0) clearSelection(state.focused); }; $('up').onclick = () => load(state.focused, parentOf(currentPath())); $('refresh').onclick = refreshAll;
+  $('statusbar').onpointerdown = event => { if (event.button === 0) clearSelection(state.focused); }; $('up').onclick = goUp; $('refresh').onclick = refreshAll;
   $('address-wrap').ondblclick = () => showAddress();
   $('address').onkeydown = event => { if (event.key === 'Enter') { const path = event.target.value.trim(); hideAddress(); if (path) load(state.focused, path); } if (event.key === 'Escape') hideAddress(); };
   $('address').onblur = hideAddress;
@@ -493,7 +571,7 @@ function bindControls() {
     if (ctrl && key === 'w') { event.preventDefault(); closeTab(); return; }
     if (ctrl && key === 'tab') { event.preventDefault(); cycleTab(shift ? -1 : 1); return; }
     if (ctrl && /^[1-9]$/.test(key)) { event.preventDefault(); switchTab(state.tabs[Number(key) - 1]?.id); return; }
-    if (ctrl && key === 'a') { event.preventDefault(); pane().selected = new Set(visibleItems(state.focused).map(x => x.path)); render(); return; }
+    if (ctrl && key === 'a') { event.preventDefault(); pane().selected = new Set(visibleItems(state.focused).map(x => x.path)); paintSelection(); return; }
     if (ctrl && key === 'c') { event.preventDefault(); cutCopy(false); return; }
     if (ctrl && key === 'x') { event.preventDefault(); cutCopy(true); return; }
     if (ctrl && key === 'v') { event.preventDefault(); paste(); return; }
@@ -503,7 +581,7 @@ function bindControls() {
     if (key === 'delete') { event.preventDefault(); deleteSelected(shift); return; }
     if (event.altKey && (key === 'arrowleft' || key === 'arrowright')) { event.preventDefault(); goHistory(key === 'arrowleft' ? -1 : 1); return; }
     if (key === 'enter' && pane().selected.size === 1) { const item = pane().items.find(x => pane().selected.has(x.path)); if (item) item.directory ? load(state.focused, item.path) : window.slate.open(item.path); return; }
-    if (key === 'backspace' || (event.altKey && key === 'arrowup')) { event.preventDefault(); load(state.focused, parentOf(currentPath())); }
+    if (key === 'backspace' || (event.altKey && key === 'arrowup')) { event.preventDefault(); goUp(); }
   });
 }
 
@@ -513,7 +591,7 @@ async function start() {
   state.home = await window.slate.home();
   state.drives = await window.slate.drives();
   const documents = state.home.folders.find(x => x.name === 'Documents')?.path || state.home.root;
-  newTab(state.home.root, true);
+  newTab(HOME, true);
   newTab(documents, true);
 }
 start().catch(error => toast(error.message));
