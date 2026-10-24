@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' slate-thumb: data:; style-src 'self'; script-src 'self'; object-src 'none'">
+  <title>Files</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <svg aria-hidden="true" class="symbols" xmlns="http://www.w3.org/2000/svg">
+    <symbol id="i-folder" viewBox="0 0 24 24"><path d="M2 6a2 2 0 0 1 2-2h5l2 2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2z" fill="currentColor"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M5 2h9l5 5v14a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1z" fill="currentColor"/><path d="M14 2v5h5" fill="none" stroke="var(--file-fold)" stroke-width="1.5"/><path d="M7 12h9M7 16h9" stroke="var(--file-line)" stroke-width="1.4"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="m3 11 9-8 9 8v9a1 1 0 0 1-1 1h-6v-7h-4v7H4a1 1 0 0 1-1-1z" fill="currentColor"/></symbol>
+    <symbol id="i-drive" viewBox="0 0 24 24"><path d="M5 4h14l3 13v3H2v-3L5 4z" fill="currentColor" opacity=".75"/><path d="M2 17h20" stroke="currentColor"/><circle cx="18" cy="18.5" r="1" fill="var(--accent)"/></symbol>
+    <symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="m14.5 4-8 8 8 8M7 12h14"/></symbol>
+    <symbol id="i-arrow-right" viewBox="0 0 24 24"><path d="m9.5 4 8 8-8 8M17 12H3"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="m4 13 8-8 8 8M12 5v16"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 10a8 8 0 1 0 .2 5M20 3v7h-7"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 4v16M4 12h16"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></symbol>
+    <symbol id="i-cut" viewBox="0 0 24 24"><circle cx="5" cy="18" r="3"/><circle cx="19" cy="18" r="3"/><path d="M7 15 18 3M17 15 6 3"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="7" width="12" height="14" rx="2"/><path d="M16 7V4a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h3"/></symbol>
+    <symbol id="i-paste" viewBox="0 0 24 24"><rect x="4" y="5" width="16" height="17" rx="2"/><rect x="9" y="2" width="6" height="5" rx="1"/><path d="M8 12h8M8 16h8"/></symbol>
+    <symbol id="i-rename" viewBox="0 0 24 24"><path d="M5 3v18M8 3H2M8 21H2M12 5h9v14h-9"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7M14 10v7"/></symbol>
+    <symbol id="i-split" viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="18" rx="2"/><path d="M12 3v18"/></symbol>
+    <symbol id="i-grid" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></symbol>
+    <symbol id="i-list" viewBox="0 0 24 24"><path d="M9 5h13M9 12h13M9 19h13M3 5h2M3 12h2M3 19h2"/></symbol>
+    <symbol id="i-chevron" viewBox="0 0 24 24"><path d="m8 5 7 7-7 7"/></symbol>
+    <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M9 2h6l.6 2.5 2 1.2L20 5l3 5-1.9 1.7v2.6L23 16l-3 5-2.4-.7-2 1.2L15 24H9l-.6-2.5-2-1.2L4 21l-3-5 1.9-1.7v-2.6L1 10l3-5 2.4.7 2-1.2L9 2z"/></symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24"><path d="m7 3 10 10M9 3l6-1 7 7-1 6-5 1-6 6-2-8-6-2 6-6z"/></symbol>
+  </svg>
+  <div id="app">
+    <div class="titlebar">
+      <div class="tabstrip" id="tabstrip"></div>
+      <button class="tab-add" id="add-tab" aria-label="New tab" title="New tab (Ctrl+T)"><svg><use href="#i-plus"/></svg></button>
+      <div class="title-drag"></div>
+      <div class="window-controls">
+        <button id="minimize" aria-label="Minimize">−</button><button id="maximize" aria-label="Maximize">□</button><button id="close-window" aria-label="Close">×</button>
+      </div>
+    </div>
+    <div class="navigation">
+      <button class="nav-btn" id="back" title="Back"><svg><use href="#i-arrow-left"/></svg></button>
+      <button class="nav-btn" id="forward" title="Forward"><svg><use href="#i-arrow-right"/></svg></button>
+      <button class="nav-btn" id="up" title="Up"><svg><use href="#i-arrow-up"/></svg></button>
+      <button class="nav-btn" id="refresh" title="Refresh (Ctrl+R)"><svg><use href="#i-refresh"/></svg></button>
+      <div class="address-wrap" id="address-wrap"><div class="breadcrumbs" id="breadcrumbs"></div><input id="address" type="text" spellcheck="false" aria-label="Folder path" hidden></div>
+      <div class="search-wrap"><svg><use href="#i-search"/></svg><input id="search" type="search" placeholder="Search this folder" aria-label="Search this folder"></div>
+    </div>
+    <div class="workspace">
+      <aside class="sidebar" id="sidebar">
+        <div class="sidebar-top" id="sidebar-top"></div>
+        <div class="sidebar-scroll" id="sidebar-scroll"></div>
+        <button class="settings-row" id="settings"><svg><use href="#i-settings"/></svg><span>Settings</span></button>
+      </aside>
+      <main class="main-area">
+        <div class="toolbar">
+          <button class="new-button" id="new-folder" title="New folder (Ctrl+Shift+N)"><span class="new-circle"><svg><use href="#i-plus"/></svg></span> New</button>
+          <span class="toolbar-separator"></span>
+          <button class="tool-btn" id="cut" title="Cut (Ctrl+X)"><svg><use href="#i-cut"/></svg></button>
+          <button class="tool-btn" id="copy" title="Copy (Ctrl+C)"><svg><use href="#i-copy"/></svg></button>
+          <button class="tool-btn" id="paste" title="Paste (Ctrl+V)"><svg><use href="#i-paste"/></svg></button>
+          <button class="tool-btn" id="rename" title="Rename (F2)"><svg><use href="#i-rename"/></svg></button>
+          <button class="tool-btn" id="delete" title="Move to Recycle Bin (Delete)"><svg><use href="#i-trash"/></svg></button>
+          <div class="toolbar-spacer"></div>
+          <button class="tool-btn" id="sort" title="Sort"><span class="sort-glyph">☰</span></button>
+          <button class="tool-btn" id="view" title="Change view"><svg><use href="#i-grid"/></svg></button>
+          <button class="tool-btn" id="split" title="Toggle split pane"><svg><use href="#i-split"/></svg></button>
+          <button class="tool-btn" id="appearance" title="Appearance"><span class="glass-glyph">◐</span></button>
+        </div>
+        <div class="panes" id="panes"><section class="file-pane" data-pane="primary"><div class="pane-heading" id="primary-heading"></div><div class="file-content" id="primary-content"></div></section><section class="file-pane secondary" data-pane="secondary" id="secondary-pane" hidden><div class="pane-heading" id="secondary-heading"></div><div class="file-content" id="secondary-content"></div></section></div>
+        <div class="statusbar" id="statusbar"></div>
+      </main>
+    </div>
+  </div>
+  <div class="menu" id="context-menu" hidden></div>
+  <div class="modal-backdrop" id="modal-backdrop" hidden><div class="modal" role="dialog" aria-modal="true"><h2 id="modal-title"></h2><p id="modal-description"></p><input id="modal-input" spellcheck="false"><div class="modal-actions"><button id="modal-cancel">Cancel</button><button class="primary-action" id="modal-confirm">Create</button></div></div></div>
+  <div class="toast" id="toast" hidden></div>
+  <script src="renderer.js"></script>
+</body>
+</html>

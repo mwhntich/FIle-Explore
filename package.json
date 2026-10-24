@@ -1,0 +1,17 @@
+{
+  "name": "files-independent",
+  "version": "1.0.0",
+  "description": "An independent tabbed Windows file manager",
+  "main": "main.js",
+  "author": "Files Independent",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "powershell -NoProfile -ExecutionPolicy Bypass -File build-windows.ps1",
+    "test": "node --test tests/*.test.js"
+  },
+  "devDependencies": {
+    "electron": "45.0.0",
+    "electron-winstaller": "5.4.0"
+  }
+}
