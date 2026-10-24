@@ -373,8 +373,10 @@ function startItemDrag(event, item, index, which) {
     }
     if (point.clientX <= 0 || point.clientY <= 0 || point.clientX >= innerWidth - 1 || point.clientY >= innerHeight - 1) {
       // Leaving the window: hand the files to Windows so they can be dropped in Explorer, the desktop, or other apps.
-      const files = drag.files; const image = drag.ghost.snapshot(); drag.ghost.remove(); finish(); state.outgoing = files;
-      window.slate.startDrag(files, image).catch(error => toast(error.message)).finally(() => { setTimeout(() => { state.outgoing = null; refreshAll(); }, 400); });
+      const files = drag.files; const image = drag.ghost.snapshot();
+      const ghost = { symbols: document.querySelector('.symbols').outerHTML, html: drag.ghost.element.innerHTML };
+      drag.ghost.remove(); finish(); state.outgoing = files;
+      window.slate.startDrag(files, image, ghost).catch(error => toast(error.message)).finally(() => { setTimeout(() => { state.outgoing = null; refreshAll(); }, 400); });
       return;
     }
     drag.ghost.moveTo(point.clientX, point.clientY);

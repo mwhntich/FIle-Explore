@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, shell, nativeTheme, nativeImage, net, protocol } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell, nativeTheme, nativeImage, net, protocol, screen } = require('electron');
 const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
@@ -82,6 +82,23 @@ async function drives() {
   }
 }
 
+// Small click-through window that keeps animating the dragged stack after it leaves the main window.
+let dragOverlay = null;
+const OVERLAY = { width: 240, height: 230, anchorX: 120, offsetY: 4 };
+function ensureOverlay() {
+  if (dragOverlay && !dragOverlay.isDestroyed()) return dragOverlay;
+  dragOverlay = new BrowserWindow({
+    width: OVERLAY.width, height: OVERLAY.height, show: false, frame: false, transparent: true, backgroundColor: '#00000000',
+    resizable: false, movable: false, minimizable: false, maximizable: false, focusable: false, skipTaskbar: true, hasShadow: false, alwaysOnTop: true,
+    webPreferences: { preload: path.join(__dirname, 'overlay-preload.js'), contextIsolation: true, nodeIntegration: false, sandbox: false }
+  });
+  dragOverlay.setIgnoreMouseEvents(true);
+  dragOverlay.setAlwaysOnTop(true, 'screen-saver');
+  dragOverlay.loadFile(path.join(__dirname, 'overlay.html'));
+  return dragOverlay;
+}
+const transparentPixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==';
+
 function createWindow() {
   window = new BrowserWindow({
     width: 1400, height: 900, minWidth: 880, minHeight: 580,
@@ -101,9 +118,11 @@ function createWindow() {
     if (command === 'browser-backward') window.webContents.send('nav', -1);
     if (command === 'browser-forward') window.webContents.send('nav', 1);
   });
+  window.on('closed', () => { if (dragOverlay && !dragOverlay.isDestroyed()) dragOverlay.destroy(); window = null; });
   window.loadFile(path.join(__dirname, 'index.html'));
   window.webContents.once('did-finish-load', async () => {
     window.show();
+    try { ensureOverlay(); } catch (error) { diagnostic(`overlay: ${errorMessage(error)}`); }
     if (process.env.SLATE_CAPTURE) {
       await new Promise(resolve => setTimeout(resolve, 2500));
       const shot = await window.webContents.capturePage();
@@ -186,10 +205,33 @@ ipcMain.handle('remove', async (_, paths) => {
   await Promise.all(Array.from({ length: Math.min(8, paths.length) }, worker));
   return results;
 });
-ipcMain.handle('start-drag', async (event, paths, image) => {
+ipcMain.handle('start-drag', async (event, paths, image, ghost) => {
   const files = paths.filter(file => fs.existsSync(file));
   if (!files.length) return;
-  let icon = null;
+  // Animated stack that follows the cursor; it sits just below the cursor tip so it never covers the drop point.
+  let overlay = null, timer = null;
+  try {
+    const candidate = ghost ? ensureOverlay() : null;
+    if (candidate && !candidate.webContents.isLoading()) {
+      candidate.webContents.send('ghost', ghost.symbols, ghost.html);
+      const place = () => {
+        if (candidate.isDestroyed()) return;
+        const point = screen.getCursorScreenPoint();
+        candidate.setPosition(Math.round(point.x - OVERLAY.anchorX), Math.round(point.y + OVERLAY.offsetY));
+        candidate.webContents.send('cursor', point.x, point.y);
+      };
+      place(); candidate.showInactive(); timer = setInterval(place, 16); overlay = candidate;
+    }
+  } catch (error) { diagnostic(`overlay: ${errorMessage(error)}`); }
+  let icon = overlay ? nativeImage.createFromDataURL(transparentPixel) : null;
+  if (overlay) {
+    try { event.sender.startDrag({ file: files[0], files, icon }); }
+    finally {
+      clearInterval(timer);
+      if (!overlay.isDestroyed()) { overlay.webContents.send('land'); setTimeout(() => { if (!overlay.isDestroyed()) overlay.hide(); }, 280); }
+    }
+    return;
+  }
   // Prefer the renderer's picture of the grabbed stack (with the item count); fall back to the file's own icon.
   try { if (image) icon = nativeImage.createFromDataURL(image); } catch {}
   try { if (!icon || icon.isEmpty()) icon = await app.getFileIcon(files[0], { size: 'normal' }); } catch {}

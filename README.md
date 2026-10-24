@@ -19,7 +19,7 @@ Files is an independently built Windows file manager inspired by the general lay
 - Drag and drop between folders, panes, and tabs; accepts files dropped from Windows Explorer
 - New folder, rename, copy, cut, paste, open, and move to Recycle Bin
 
-Home shows your main folders and every drive (including mapped network drives such as `Z:`) with free space, like This PC. Drag items out of the window to drop them in Windows Explorer, on the desktop, or in other apps.
+Home shows your main folders and every drive (including mapped network drives such as `Z:`) with free space, like This PC. Drag items out of the window to drop them in Windows Explorer, on the desktop, or in other apps; the animated stack keeps following the cursor outside the window.
 
 ## Shortcuts
 

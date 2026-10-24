@@ -17,7 +17,7 @@ try {
     Copy-Item -Path (Join-Path $electron '*') -Destination $stage -Recurse -Force
     $app = Join-Path $stage 'resources\app'
     New-Item -ItemType Directory -Path (Join-Path $app 'assets') -Force | Out-Null
-    $files = @('package.json','main.js','file-ops.js','preload.js','index.html','renderer.js','style.css','README.md','LICENSE')
+    $files = @('package.json','main.js','file-ops.js','preload.js','index.html','renderer.js','style.css','overlay.html','overlay.js','overlay-preload.js','README.md','LICENSE')
     foreach ($file in $files) { Copy-Item -LiteralPath (Join-Path $project $file) -Destination $app -Force }
     Copy-Item -LiteralPath (Join-Path $project 'assets\icon.ico') -Destination (Join-Path $app 'assets') -Force
     Rename-Item -LiteralPath (Join-Path $stage 'electron.exe') -NewName 'Files.exe'
