@@ -61,6 +61,11 @@ async function listDirectory(folder) {
   return { path: resolved, items };
 }
 
+// "\\\\ANBAR\\share" -> "share (\\\\ANBAR)", the way Windows Explorer labels mapped drives.
+function networkName(provider, label) {
+  const match = String(provider || '').match(/^\\\\([^\\]+)\\(.+)$/);
+  return match ? `${match[2].split('\\').pop()} (\\\\${match[1]})` : label || 'Network Drive';
+}
 async function drives() {
   if (process.platform !== 'win32') return [{ name: 'Home', path: os.homedir() }];
   try {
@@ -68,7 +73,7 @@ async function drives() {
     const { stdout } = await execFileAsync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], { windowsHide: true, timeout: 10000 });
     const parsed = JSON.parse(stdout);
     return (Array.isArray(parsed) ? parsed : [parsed]).filter(x => x && x.DeviceID).map(x => ({
-      name: x.VolumeName || (x.DriveType === 4 ? 'Network drive' : x.DeviceID === 'C:' ? 'Windows' : 'Local drive'),
+      name: x.DriveType === 4 ? networkName(x.ProviderName, x.VolumeName) : x.VolumeName || (x.DriveType === 2 ? 'USB Drive' : x.DriveType === 5 ? 'DVD Drive' : 'Local Disk'),
       path: `${x.DeviceID}\\`, network: x.DriveType === 4,
       size: typeof x.Size === 'number' ? x.Size : null, free: typeof x.FreeSpace === 'number' ? x.FreeSpace : null, provider: x.ProviderName || ''
     }));
@@ -181,11 +186,13 @@ ipcMain.handle('remove', async (_, paths) => {
   await Promise.all(Array.from({ length: Math.min(8, paths.length) }, worker));
   return results;
 });
-ipcMain.handle('start-drag', async (event, paths) => {
+ipcMain.handle('start-drag', async (event, paths, image) => {
   const files = paths.filter(file => fs.existsSync(file));
   if (!files.length) return;
   let icon = null;
-  try { icon = await app.getFileIcon(files[0], { size: 'normal' }); } catch {}
+  // Prefer the renderer's picture of the grabbed stack (with the item count); fall back to the file's own icon.
+  try { if (image) icon = nativeImage.createFromDataURL(image); } catch {}
+  try { if (!icon || icon.isEmpty()) icon = await app.getFileIcon(files[0], { size: 'normal' }); } catch {}
   if (!icon || icon.isEmpty()) icon = nativeImage.createFromPath(path.join(__dirname, 'assets', 'icon.ico')).resize({ width: 32, height: 32 });
   event.sender.startDrag({ file: files[0], files, icon });
 });

@@ -10,7 +10,7 @@ function currentPath(which = state.focused) { return pane(which)?.path || HOME; 
 function isHome(file) { return file === HOME; }
 function homeItems() {
   const folders = state.home.folders.map(x => ({ name: x.name, path: x.path, directory: true, kind: 'folder', section: 'folders' }));
-  const drives = state.drives.map(x => ({ name: `${x.name} (${x.path.slice(0, 2)})`, path: x.path, directory: true, kind: 'drive', section: 'drives', size: x.size ?? null, free: x.free ?? null, network: !!x.network, provider: x.provider || '' }));
+  const drives = state.drives.map(x => ({ name: `${x.name} (${x.path.slice(0, 2)})`, path: x.path, directory: true, kind: 'drive', section: x.network ? 'network' : 'drives', size: x.size ?? null, free: x.free ?? null, network: !!x.network, provider: x.provider || '' }));
   return [...folders, ...drives];
 }
 function nameOf(file) {
@@ -214,21 +214,21 @@ function renderPane(which) {
 }
 function renderHome(content, items, which) {
   const view = document.createElement('div'); view.className = 'home-view';
-  for (const [section, title] of [['folders', 'Folders'], ['drives', 'Drives']]) {
+  for (const [section, title] of [['folders', 'Folders'], ['drives', 'Devices and drives'], ['network', 'Network locations']]) {
     const entries = items.map((item, index) => ({ item, index })).filter(x => x.item.section === section);
     if (!entries.length) continue;
     const heading = document.createElement('h3'); heading.className = 'home-heading'; heading.textContent = title; view.append(heading);
-    const grid = document.createElement('div'); grid.className = section === 'drives' ? 'drive-grid' : 'file-grid home-folders';
+    const grid = document.createElement('div'); grid.className = section === 'folders' ? 'file-grid home-folders' : 'drive-grid';
     for (const { item, index } of entries) {
       const model = pane(which);
       const card = document.createElement('div'); card.dataset.path = item.path; card.dataset.directory = '1';
-      if (section === 'drives') {
+      if (section !== 'folders') {
         card.className = `drive-card ${model.selected.has(item.path) ? 'selected' : ''}`;
         const used = item.size ? Math.min(1, Math.max(0, (item.size - item.free) / item.size)) : 0;
         card.innerHTML = `<div class="drive-icon ${item.network ? 'network' : ''}">${icon('drive')}</div><div class="drive-info"><span class="drive-name"></span><div class="drive-bar"><span></span></div><span class="drive-space"></span></div>`;
         card.querySelector('.drive-name').textContent = item.name;
         card.querySelector('.drive-bar span').style.width = `${Math.round(used * 100)}%`;
-        card.querySelector('.drive-bar').classList.toggle('full', used > 0.9);
+        card.querySelector('.drive-bar').classList.toggle('full', used >= 0.9);
         card.querySelector('.drive-space').textContent = item.size ? `${formatSize(item.free)} free of ${formatSize(item.size)}` : item.provider || (item.network ? 'Network drive' : '');
         card.title = item.provider ? `${item.path}  —  ${item.provider}` : item.path;
       } else {
@@ -270,6 +270,81 @@ function bindItem(element, item, index, which) {
   element.ondragleave = () => element.classList.remove('drop-target');
   element.ondrop = event => { if (!item.directory) return; event.preventDefault(); event.stopPropagation(); element.classList.remove('drop-target'); handleDrop(event, item.path, which); };
 }
+// Drag preview: a stack of the grabbed items that hangs under the cursor, swings with horizontal speed and squishes with velocity.
+const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+function createDragGhost(files, which, x, y) {
+  const model = pane(which);
+  const items = files.map(file => model.items.find(item => samePath(item.path, file))).filter(Boolean);
+  const root = document.createElement('div'); root.className = 'drag-ghost';
+  const stack = document.createElement('div'); stack.className = 'drag-stack'; root.append(stack);
+  items.slice(0, 3).reverse().forEach((item, layer, list) => {
+    const depth = list.length - 1 - layer;
+    const card = document.createElement('div'); card.className = 'drag-card'; card.style.setProperty('--depth', depth);
+    card.append(itemIcon(item));
+    if (depth === 0) { const label = document.createElement('span'); label.className = 'drag-label'; label.textContent = item.name; card.append(label); }
+    stack.append(card);
+  });
+  if (files.length > 1) { const badge = document.createElement('span'); badge.className = 'drag-count'; badge.textContent = files.length; root.append(badge); }
+  const mode = document.createElement('span'); mode.className = 'drag-mode'; root.append(mode);
+  document.body.append(root);
+  const body = { x, y, tx: x, ty: y, vx: 0, vy: 0, rot: 0, rotV: 0, sx: 1, sy: 1, scale: 0.55, scaleV: 0, running: true, frame: 0 };
+  const step = () => {
+    if (!body.running) return;
+    const px = body.x, py = body.y;
+    body.x += (body.tx - body.x) * 0.38; body.y += (body.ty - body.y) * 0.38;
+    body.vx = body.x - px; body.vy = body.y - py;
+    const speed = Math.hypot(body.vx, body.vy);
+    // Swing: a damped spring toward an angle that follows horizontal speed, so the stack lags and overshoots like a pendulum.
+    const rotTarget = reduceMotion ? 0 : Math.max(-30, Math.min(30, body.vx * 1.7));
+    body.rotV = (body.rotV + (rotTarget - body.rot) * 0.18) * 0.78; body.rot += body.rotV;
+    // Squish: stretch along the direction of travel, compress across it, then spring back when the cursor stops.
+    const stretch = reduceMotion ? 0 : Math.min(speed / 55, 0.22);
+    const along = speed ? Math.abs(body.vx) / speed : 0, across = speed ? Math.abs(body.vy) / speed : 0;
+    const sxTarget = 1 + stretch * along - stretch * 0.6 * across, syTarget = 1 + stretch * across - stretch * 0.6 * along;
+    body.sx += (sxTarget - body.sx) * 0.3; body.sy += (syTarget - body.sy) * 0.3;
+    // Pick-up pop: scale springs from small to full size with a little overshoot.
+    body.scaleV = (body.scaleV + (1 - body.scale) * 0.22) * 0.72; body.scale += body.scaleV;
+    root.style.transform = `translate(${body.x}px, ${body.y + 10}px) translateX(-50%) rotate(${body.rot}deg) scale(${body.scale * body.sx}, ${body.scale * body.sy})`;
+    body.frame = requestAnimationFrame(step);
+  };
+  step();
+  return {
+    element: root,
+    moveTo(nx, ny) { body.tx = nx; body.ty = ny; },
+    setMode(text) { mode.textContent = text; root.classList.toggle('copy', text === 'Copy'); },
+    // Shrink into the drop target, or fly back home when nothing accepted the drop.
+    land(rect, back) {
+      body.running = false; cancelAnimationFrame(body.frame);
+      const x2 = rect ? rect.left + rect.width / 2 : back.x, y2 = rect ? rect.top + rect.height / 2 - 10 : back.y;
+      root.classList.add('landing');
+      root.style.transform = `translate(${x2}px, ${y2}px) translateX(-50%) rotate(0deg) scale(${rect ? 0.25 : 0.6})`;
+      root.style.opacity = '0';
+      setTimeout(() => root.remove(), 260);
+    },
+    remove() { body.running = false; cancelAnimationFrame(body.frame); root.remove(); },
+    // Picture of the stack for Windows to show under the cursor once the drag leaves the window.
+    snapshot() { return renderStackImage(items, files.length); }
+  };
+}
+function renderStackImage(items, count) {
+  const canvas = document.createElement('canvas'); const size = 96; canvas.width = size; canvas.height = size;
+  const g = canvas.getContext('2d'); const accent = getComputedStyle(document.body).getPropertyValue('--accent').trim() || '#4dbdf2';
+  const layers = Math.min(3, items.length || 1);
+  for (let i = layers - 1; i >= 0; i--) {
+    g.save(); g.translate(48, 52); g.rotate((i * 7 - 3) * Math.PI / 180); g.translate(-30 + i * 4, -30 - i * 4);
+    g.fillStyle = i === 0 ? '#3a3d41' : '#2c2f33'; g.strokeStyle = i === 0 ? accent : '#5a5f66'; g.lineWidth = 2;
+    g.beginPath(); g.roundRect(0, 0, 60, 60, 8); g.fill(); g.stroke();
+    const item = items[i]; g.fillStyle = item?.directory ? '#ffc83d' : '#eef1f3';
+    if (item?.directory) { g.beginPath(); g.roundRect(12, 18, 36, 26, 3); g.fill(); g.fillRect(12, 14, 15, 6); }
+    else { g.beginPath(); g.roundRect(18, 12, 24, 34, 3); g.fill(); }
+    g.restore();
+  }
+  if (count > 1) {
+    g.fillStyle = accent; g.beginPath(); g.arc(78, 18, 15, 0, Math.PI * 2); g.fill();
+    g.fillStyle = '#04121a'; g.font = 'bold 15px Segoe UI, sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(count > 99 ? '99+' : String(count), 78, 19);
+  }
+  return canvas.toDataURL('image/png');
+}
 // Internal drag and drop runs on pointer events instead of HTML5 drag, which is unreliable in a frameless window on Windows.
 function startItemDrag(event, item, index, which) {
   if (isHome(pane(which)?.path)) return; // Home shows shortcuts to folders and drives; they aren't moved by dragging.
@@ -279,7 +354,8 @@ function startItemDrag(event, item, index, which) {
   const finish = () => {
     window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('keydown', cancelKey, true);
     if (!drag) return;
-    clearTimeout(drag.tabTimer); drag.ghost.remove(); clearTarget(); document.body.classList.remove('dragging'); state.dragging = null;
+    clearTimeout(drag.tabTimer); clearTarget(); document.body.classList.remove('dragging'); state.dragging = null;
+    document.querySelectorAll('.drag-source').forEach(x => x.classList.remove('drag-source'));
     state.suppressClick = true; setTimeout(() => { state.suppressClick = false; }, 0);
   };
   const move = point => {
@@ -288,22 +364,22 @@ function startItemDrag(event, item, index, which) {
       const model = pane(which);
       if (!model.selected.has(item.path)) { model.selected = new Set([item.path]); model.anchor = index; }
       state.focused = which;
-      const files = [...model.selected];
-      const ghost = document.createElement('div'); ghost.className = 'drag-ghost';
-      ghost.textContent = files.length === 1 ? nameOf(files[0]) : `${files.length} items`;
-      document.body.append(ghost); document.body.classList.add('dragging');
+      const files = [item.path, ...[...model.selected].filter(file => file !== item.path)];
+      const ghost = createDragGhost(files, which, point.clientX, point.clientY);
+      document.body.classList.add('dragging');
       drag = state.dragging = { files, which, ghost, target: null, tabTimer: null };
       paintSelection();
+      document.querySelectorAll(`#${which}-content [data-path]`).forEach(x => { if (model.selected.has(x.dataset.path)) x.classList.add('drag-source'); });
     }
     if (point.clientX <= 0 || point.clientY <= 0 || point.clientX >= innerWidth - 1 || point.clientY >= innerHeight - 1) {
       // Leaving the window: hand the files to Windows so they can be dropped in Explorer, the desktop, or other apps.
-      const files = drag.files; finish(); state.outgoing = files;
-      window.slate.startDrag(files).catch(error => toast(error.message)).finally(() => { setTimeout(() => { state.outgoing = null; refreshAll(); }, 400); });
+      const files = drag.files; const image = drag.ghost.snapshot(); drag.ghost.remove(); finish(); state.outgoing = files;
+      window.slate.startDrag(files, image).catch(error => toast(error.message)).finally(() => { setTimeout(() => { state.outgoing = null; refreshAll(); }, 400); });
       return;
     }
-    drag.ghost.style.transform = `translate(${point.clientX + 14}px, ${point.clientY + 14}px)`;
-    drag.ghost.dataset.mode = dropMove(drag.files, dropTargetAt(point.clientX, point.clientY)?.path, point.ctrlKey, point.shiftKey) ? 'Move' : 'Copy';
+    drag.ghost.moveTo(point.clientX, point.clientY);
     const target = dropTargetAt(point.clientX, point.clientY);
+    drag.ghost.setMode(target ? (dropMove(drag.files, target.path, point.ctrlKey, point.shiftKey) ? 'Move' : 'Copy') : '');
     if (target?.element !== drag.target?.element) {
       clearTarget(); clearTimeout(drag.tabTimer);
       if (target) target.element.classList.add('drop-target');
@@ -313,10 +389,11 @@ function startItemDrag(event, item, index, which) {
   };
   const up = point => {
     const current = drag; const target = current && dropTargetAt(point.clientX, point.clientY);
+    if (current) current.ghost.land(target ? target.element.getBoundingClientRect() : null, { x: startX, y: startY });
     finish();
     if (current && target) transferItems(current.files, target.path, dropMove(current.files, target.path, point.ctrlKey, point.shiftKey));
   };
-  const cancelKey = key => { if (key.key === 'Escape') { key.preventDefault(); key.stopPropagation(); finish(); } };
+  const cancelKey = key => { if (key.key === 'Escape') { key.preventDefault(); key.stopPropagation(); if (drag) drag.ghost.land(null, { x: startX, y: startY }); finish(); } };
   try { event.currentTarget.setPointerCapture(event.pointerId); } catch {}
   window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('keydown', cancelKey, true);
 }
