@@ -9,6 +9,8 @@ contextBridge.exposeInMainWorld('slate', {
   mkdir: (parent, name) => ipcRenderer.invoke('mkdir', parent, name),
   rename: (source, name) => ipcRenderer.invoke('rename', source, name),
   trash: paths => ipcRenderer.invoke('trash', paths),
+  remove: paths => ipcRenderer.invoke('remove', paths),
+  onNav: callback => ipcRenderer.on('nav', (_event, direction) => callback(direction)),
   window: action => ipcRenderer.invoke('window', action),
   pathForFile: file => webUtils.getPathForFile(file)
 });

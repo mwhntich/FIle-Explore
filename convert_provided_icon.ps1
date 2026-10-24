@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][string]$Source,
-    [string]$OutputDirectory = $PSScriptRoot
+    [string]$OutputDirectory = (Join-Path $PSScriptRoot 'assets')
 )
 
 Add-Type -AssemblyName System.Drawing

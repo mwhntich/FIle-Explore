@@ -85,7 +85,7 @@ function renderTabs() {
   const strip = $('tabstrip'); strip.replaceChildren();
   state.tabs.forEach(model => {
     const button = document.createElement('button');
-    button.className = `tab ${model.id === state.active ? 'active' : ''}`;
+    button.className = `tab ${model.id === state.active ? 'active' : ''}`; button.dataset.tabId = model.id;
     button.title = model.path || 'Home';
     button.innerHTML = `${icon(model.path && samePath(model.path, state.home.root) ? 'home' : 'folder')}<span class="tab-title"></span><span class="tab-close" title="Close tab">×</span>`;
     button.querySelector('.tab-title').textContent = model.path && samePath(model.path, state.home.root) ? 'Home' : nameOf(model.path);
@@ -115,7 +115,7 @@ function sidebarRow(label, target, symbol, isHome = false) {
   button.className = `sidebar-row ${samePath(currentPath('primary'), target) ? 'active' : ''}`;
   button.innerHTML = `${icon(symbol)}<span class="row-name"></span>${!isHome && symbol === 'folder' ? '<span class="row-tail">♢</span>' : ''}`;
   button.querySelector('.row-name').textContent = label;
-  button.title = target;
+  button.title = target; button.dataset.dropPath = target;
   button.onclick = event => { if (event.ctrlKey) newTab(target); else load('primary', target); };
   button.onauxclick = event => { if (event.button === 1) newTab(target); };
   button.ondragover = event => event.preventDefault();
@@ -182,7 +182,7 @@ function renderPane(which) {
   else if (state.view === 'grid') {
     const grid = document.createElement('div'); grid.className = 'file-grid';
     items.forEach((item, index) => {
-      const card = document.createElement('div'); card.className = `file-card ${model.selected.has(item.path) ? 'selected' : ''}`; card.draggable = true; card.dataset.path = item.path;
+      const card = document.createElement('div'); card.className = `file-card ${model.selected.has(item.path) ? 'selected' : ''}`; card.dataset.path = item.path; card.dataset.directory = item.directory ? '1' : '';
       card.append(itemIcon(item));
       const label = document.createElement('span'); label.className = 'file-name'; label.textContent = item.name; card.append(label);
       bindItem(card, item, index, which); grid.append(card);
@@ -192,7 +192,7 @@ function renderPane(which) {
     const head = document.createElement('thead'); head.innerHTML = '<tr><th>Name</th><th>Date modified</th><th>Size</th></tr>'; table.append(head);
     const body = document.createElement('tbody');
     items.forEach((item, index) => {
-      const row = document.createElement('tr'); row.className = `item-row ${model.selected.has(item.path) ? 'selected' : ''}`; row.draggable = true; row.dataset.path = item.path;
+      const row = document.createElement('tr'); row.className = `item-row ${model.selected.has(item.path) ? 'selected' : ''}`; row.dataset.path = item.path; row.dataset.directory = item.directory ? '1' : '';
       const name = document.createElement('td'); const iconWrap = document.createElement('span'); iconWrap.className = `table-icon ${item.directory ? '' : 'file'}`; iconWrap.innerHTML = icon(item.directory ? 'folder' : 'file'); const text = document.createElement('span'); text.textContent = item.name; iconWrap.append(text); name.append(iconWrap);
       const date = document.createElement('td'); date.textContent = item.modified ? new Date(item.modified).toLocaleDateString() : '';
       const size = document.createElement('td'); size.textContent = formatSize(item.size);
@@ -214,31 +214,98 @@ function selectItem(item, index, which, event) {
   state.focused = which; render();
 }
 function bindItem(element, item, index, which) {
-  element.onclick = event => { event.stopPropagation(); selectItem(item, index, which, event); };
+  element.onclick = event => { event.stopPropagation(); if (state.suppressClick) return; selectItem(item, index, which, event); };
   element.ondblclick = event => { event.stopPropagation(); item.directory ? load(which, item.path) : window.slate.open(item.path).then(error => { if (error) toast(error); }); };
   element.oncontextmenu = event => { event.preventDefault(); event.stopPropagation(); const model = pane(which); if (!model.selected.has(item.path)) { model.selected = new Set([item.path]); state.focused = which; render(); } showItemMenu(event.clientX, event.clientY, item, which); };
-  element.ondragstart = event => {
-    const model = pane(which);
-    if (!model.selected.has(item.path)) model.selected = new Set([item.path]);
-    state.focused = which;
-    const files = [...model.selected];
-    event.dataTransfer.setData('application/x-slate-files', JSON.stringify(files));
-    event.dataTransfer.setData('text/plain', files.join('\n'));
-    event.dataTransfer.effectAllowed = 'copyMove';
-    renderStatus();
-  };
-  element.ondragover = event => { if (!item.directory) return; event.preventDefault(); event.stopPropagation(); element.classList.add('drop-target'); event.dataTransfer.dropEffect = event.ctrlKey ? 'copy' : 'move'; };
+  element.onpointerdown = event => { if (event.button === 0) startItemDrag(event, item, index, which); };
+  // Native drag events are only used for files dropped in from Windows Explorer.
+  element.ondragover = event => { if (!item.directory) return; event.preventDefault(); event.stopPropagation(); element.classList.add('drop-target'); event.dataTransfer.dropEffect = 'copy'; };
   element.ondragleave = () => element.classList.remove('drop-target');
   element.ondrop = event => { if (!item.directory) return; event.preventDefault(); event.stopPropagation(); element.classList.remove('drop-target'); handleDrop(event, item.path, which); };
 }
+// Internal drag and drop runs on pointer events instead of HTML5 drag, which is unreliable in a frameless window on Windows.
+function startItemDrag(event, item, index, which) {
+  const startX = event.clientX, startY = event.clientY;
+  let drag = null;
+  const clearTarget = () => { document.querySelectorAll('.drop-target').forEach(x => x.classList.remove('drop-target')); };
+  const finish = () => {
+    window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('keydown', cancelKey, true);
+    if (!drag) return;
+    clearTimeout(drag.tabTimer); drag.ghost.remove(); clearTarget(); document.body.classList.remove('dragging'); state.dragging = null;
+    state.suppressClick = true; setTimeout(() => { state.suppressClick = false; }, 0);
+  };
+  const move = point => {
+    if (!drag) {
+      if (Math.abs(point.clientX - startX) + Math.abs(point.clientY - startY) < 6) return;
+      const model = pane(which);
+      if (!model.selected.has(item.path)) { model.selected = new Set([item.path]); model.anchor = index; }
+      state.focused = which;
+      const files = [...model.selected];
+      const ghost = document.createElement('div'); ghost.className = 'drag-ghost';
+      ghost.textContent = files.length === 1 ? nameOf(files[0]) : `${files.length} items`;
+      document.body.append(ghost); document.body.classList.add('dragging');
+      drag = state.dragging = { files, which, ghost, target: null, tabTimer: null };
+      render();
+    }
+    drag.ghost.style.transform = `translate(${point.clientX + 14}px, ${point.clientY + 14}px)`;
+    drag.ghost.dataset.mode = dropMove(drag.files, dropTargetAt(point.clientX, point.clientY)?.path, point.ctrlKey, point.shiftKey) ? 'Move' : 'Copy';
+    const target = dropTargetAt(point.clientX, point.clientY);
+    if (target?.element !== drag.target?.element) {
+      clearTarget(); clearTimeout(drag.tabTimer);
+      if (target) target.element.classList.add('drop-target');
+      if (target?.tabId && target.tabId !== state.active) drag.tabTimer = setTimeout(() => switchTab(target.tabId), 650);
+    }
+    drag.target = target;
+  };
+  const up = point => {
+    const current = drag; const target = current && dropTargetAt(point.clientX, point.clientY);
+    finish();
+    if (current && target) transferItems(current.files, target.path, dropMove(current.files, target.path, point.ctrlKey, point.shiftKey));
+  };
+  const cancelKey = key => { if (key.key === 'Escape') { key.preventDefault(); key.stopPropagation(); finish(); } };
+  window.addEventListener('pointermove', move); window.addEventListener('pointerup', up); window.addEventListener('keydown', cancelKey, true);
+}
+function dropTargetAt(x, y) {
+  const drag = state.dragging; const element = document.elementFromPoint(x, y);
+  if (!drag || !element) return null;
+  const item = element.closest('[data-path]');
+  if (item && item.dataset.directory === '1' && !drag.files.some(file => samePath(file, item.dataset.path))) return { element: item, path: item.dataset.path };
+  const tabButton = element.closest('.tab');
+  if (tabButton) { const model = state.tabs.find(x => x.id === Number(tabButton.dataset.tabId)); return model?.path ? { element: tabButton, path: model.path, tabId: model.id } : null; }
+  const sidebarRow = element.closest('.sidebar-row[data-drop-path]');
+  if (sidebarRow) return { element: sidebarRow, path: sidebarRow.dataset.dropPath };
+  const content = element.closest('.file-pane');
+  if (content) { const which = content.dataset.pane; const folder = currentPath(which); return folder ? { element: content, path: folder } : null; }
+  return null;
+}
+function sameVolume(a, b) {
+  const root = value => { const match = value.match(/^\\\\[^\\]+\\[^\\]+/); return (match ? match[0] : value.slice(0, 2)).toLowerCase(); };
+  return root(a) === root(b);
+}
+function dropMove(files, destination, ctrl, shift) {
+  if (!destination) return false;
+  if (ctrl) return false;
+  if (shift) return true;
+  return files.every(file => sameVolume(file, destination));
+}
+async function transferItems(files, destination, move) {
+  try { reportResults(await window.slate.transfer(files, destination, move), move ? 'Moved' : 'Copied'); await refreshAll(); }
+  catch (error) { toast(error.message); }
+}
+function clearSelection(which) {
+  const model = pane(which); if (!model) return;
+  model.selected.clear(); model.anchor = -1;
+  document.querySelectorAll(`#${which}-content [data-path].selected`).forEach(x => x.classList.remove('selected'));
+  renderStatus();
+}
 function bindContent(content, which) {
-  content.ondragover = event => { event.preventDefault(); event.dataTransfer.dropEffect = event.ctrlKey ? 'copy' : 'move'; };
+  content.ondragover = event => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; };
   content.ondrop = event => { event.preventDefault(); handleDrop(event, currentPath(which), which); };
   content.oncontextmenu = event => { if (event.target.closest('[data-path]')) return; event.preventDefault(); state.focused = which; showEmptyMenu(event.clientX, event.clientY, which); };
   content.onpointerdown = event => {
     if (event.button !== 0 || event.target.closest('[data-path]')) return;
     state.focused = which;
-    const model = pane(which); if (!event.ctrlKey) model.selected.clear();
+    const model = pane(which); if (!event.ctrlKey) clearSelection(which);
     const rect = content.getBoundingClientRect(); const startX = event.clientX - rect.left + content.scrollLeft, startY = event.clientY - rect.top + content.scrollTop;
     const overlay = document.createElement('div'); overlay.className = 'marquee'; content.append(overlay);
     const original = new Set(model.selected); let moved = false;
@@ -258,16 +325,11 @@ function bindContent(content, which) {
     content.setPointerCapture(event.pointerId); content.addEventListener('pointermove', move); content.addEventListener('pointerup', up); content.addEventListener('pointercancel', up);
   };
 }
-async function handleDrop(event, destination, which) {
-  const internal = event.dataTransfer.getData('application/x-slate-files');
-  let files = [];
-  if (internal) { try { files = JSON.parse(internal); } catch {} }
-  else files = [...event.dataTransfer.files].map(file => window.slate.pathForFile(file)).filter(Boolean);
-  if (!files.length) return;
-  const fromSameVolume = files.every(file => file.slice(0, 2).toLowerCase() === destination.slice(0, 2).toLowerCase());
-  const move = internal && !event.ctrlKey && (event.shiftKey || fromSameVolume);
-  try { reportResults(await window.slate.transfer(files, destination, !!move), move ? 'Moved' : 'Copied'); await refreshAll(); }
-  catch (error) { toast(error.message); }
+// Files dropped in from Windows Explorer are copied (hold Shift to move them).
+async function handleDrop(event, destination) {
+  const files = [...event.dataTransfer.files].map(file => window.slate.pathForFile(file)).filter(Boolean);
+  if (!files.length || !destination) return;
+  await transferItems(files, destination, event.shiftKey);
 }
 function renderStatus() {
   const model = pane(); if (!model) return;
@@ -292,6 +354,12 @@ async function refreshAll() {
   if (state.split) tasks.push(load('secondary', currentPath('secondary'), false));
   await Promise.all(tasks);
 }
+let lastHistoryNav = 0;
+function navigateHistory(direction) {
+  // Mouse side buttons can arrive both as mouse events and as Windows app commands; act on the first one only.
+  const now = Date.now(); if (now - lastHistoryNav < 350) return;
+  lastHistoryNav = now; goHistory(direction);
+}
 function goHistory(direction) {
   const model = pane(); const at = model.at + direction;
   if (at < 0 || at >= model.history.length) return;
@@ -314,7 +382,8 @@ function showItemMenu(x, y, item, which) {
     { icon: 'cut', label: 'Cut', run: () => cutCopy(true) },
     { icon: 'copy', label: 'Copy', run: () => cutCopy(false) },
     { icon: 'rename', label: 'Rename', run: renameSelected },
-    { icon: 'trash', label: 'Move to Recycle Bin', run: deleteSelected }
+    { icon: 'trash', label: 'Move to Recycle Bin', run: () => deleteSelected(false) },
+    { icon: 'trash', label: 'Delete permanently', run: () => deleteSelected(true) }
   ]);
 }
 function showEmptyMenu(x, y, which) {
@@ -341,10 +410,36 @@ function renameSelected() {
   const file = [...pane().selected][0]; if (!file || pane().selected.size !== 1) return;
   modal('Rename', 'Enter a new name for this item.', nameOf(file), 'Rename', name => window.slate.rename(file, name));
 }
-async function deleteSelected() {
-  const files = [...pane().selected]; if (!files.length) return;
-  try { reportResults(await window.slate.trash(files), 'Moved to Recycle Bin'); pane().selected.clear(); await refreshAll(); }
-  catch (error) { toast(error.message); }
+function confirmDialog(title, description, confirmLabel) {
+  return new Promise(resolve => {
+    $('modal-title').textContent = title; $('modal-description').textContent = description; $('modal-confirm').textContent = confirmLabel;
+    $('modal-input').hidden = true; $('modal-backdrop').hidden = false; $('modal-confirm').focus();
+    const done = accepted => { document.removeEventListener('keydown', onKey, true); $('modal-backdrop').hidden = true; $('modal-input').hidden = false; resolve(accepted); };
+    const onKey = event => { if (event.key === 'Escape' || event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); done(event.key === 'Enter'); } };
+    document.addEventListener('keydown', onKey, true);
+    $('modal-confirm').onclick = () => done(true); $('modal-cancel').onclick = () => done(false);
+  });
+}
+async function deleteSelected(permanent = false) {
+  const model = pane(); const files = [...model.selected]; if (!files.length) return;
+  try {
+    let remaining = files; let trashed = [];
+    if (!permanent) {
+      trashed = await window.slate.trash(files);
+      remaining = trashed.filter(x => !x.ok).map(x => x.file);
+      trashed = trashed.filter(x => x.ok);
+    }
+    let removed = [];
+    if (remaining.length) {
+      const description = permanent
+        ? `Permanently delete ${remaining.length === 1 ? `"${nameOf(remaining[0])}"` : `${remaining.length} items`}? This can't be undone.`
+        : `${remaining.length === 1 ? `"${nameOf(remaining[0])}"` : `${remaining.length} items`} can't go to the Recycle Bin (shared and network folders don't have one). Delete permanently? This can't be undone.`;
+      if (await confirmDialog('Delete permanently?', description, 'Delete')) removed = await window.slate.remove(remaining);
+    }
+    const results = [...trashed, ...removed];
+    if (results.length) reportResults(results, removed.length ? 'Deleted' : 'Moved to Recycle Bin');
+    model.selected.clear(); await refreshAll();
+  } catch (error) { toast(error.message); }
 }
 function cutCopy(cut) { const files = [...pane().selected]; if (!files.length) return; state.clipboard = { paths: files, cut }; toast(`${cut ? 'Cut' : 'Copied'} ${files.length} item(s).`); renderStatus(); }
 async function paste() {
@@ -363,12 +458,17 @@ function toggleSplit() {
 function bindControls() {
   $('add-tab').onclick = () => newTab();
   $('minimize').onclick = () => window.slate.window('minimize'); $('maximize').onclick = () => window.slate.window('maximize'); $('close-window').onclick = () => window.slate.window('close');
-  $('back').onclick = () => goHistory(-1); $('forward').onclick = () => goHistory(1); $('up').onclick = () => load(state.focused, parentOf(currentPath())); $('refresh').onclick = refreshAll;
+  $('back').onclick = () => goHistory(-1); $('forward').onclick = () => goHistory(1);
+  document.addEventListener('mousedown', event => { if (event.button === 3 || event.button === 4) event.preventDefault(); });
+  document.addEventListener('mouseup', event => { if (event.button === 3 || event.button === 4) { event.preventDefault(); navigateHistory(event.button === 3 ? -1 : 1); } });
+  window.slate.onNav(direction => navigateHistory(direction));
+  for (const which of ['primary', 'secondary']) $(`${which}-heading`).onpointerdown = event => { if (event.button === 0 && !event.ctrlKey) { state.focused = which; clearSelection(which); } };
+  $('statusbar').onpointerdown = event => { if (event.button === 0) clearSelection(state.focused); }; $('up').onclick = () => load(state.focused, parentOf(currentPath())); $('refresh').onclick = refreshAll;
   $('address-wrap').ondblclick = () => showAddress();
   $('address').onkeydown = event => { if (event.key === 'Enter') { const path = event.target.value.trim(); hideAddress(); if (path) load(state.focused, path); } if (event.key === 'Escape') hideAddress(); };
   $('address').onblur = hideAddress;
   $('search').oninput = render;
-  $('new-folder').onclick = newFolder; $('cut').onclick = () => cutCopy(true); $('copy').onclick = () => cutCopy(false); $('paste').onclick = paste; $('rename').onclick = renameSelected; $('delete').onclick = deleteSelected;
+  $('new-folder').onclick = newFolder; $('cut').onclick = () => cutCopy(true); $('copy').onclick = () => cutCopy(false); $('paste').onclick = paste; $('rename').onclick = renameSelected; $('delete').onclick = () => deleteSelected(false);
   $('split').onclick = toggleSplit;
   $('view').onclick = () => { state.view = state.view === 'grid' ? 'list' : 'grid'; render(); };
   $('sort').onclick = () => { state.sort = state.sort === 'name' ? 'date' : state.sort === 'date' ? 'type' : 'name'; toast(`Sorted by ${state.sort}.`); render(); };
@@ -379,8 +479,11 @@ function bindControls() {
   ]); };
   document.addEventListener('pointerdown', event => { if (!event.target.closest('#context-menu')) $('context-menu').hidden = true; });
   document.addEventListener('keydown', event => {
-    const key = event.key.toLowerCase(); const ctrl = event.ctrlKey; const shift = event.shiftKey;
-    if (key === 'escape') { $('context-menu').hidden = true; return; }
+    // Use the physical key (event.code) for letters and digits so shortcuts also work with Persian and other keyboard layouts.
+    const code = event.code || '';
+    const key = /^Key[A-Z]$/.test(code) ? code.slice(3).toLowerCase() : /^Digit[0-9]$/.test(code) ? code.slice(5) : event.key.toLowerCase();
+    const ctrl = event.ctrlKey; const shift = event.shiftKey;
+    if (key === 'escape') { $('context-menu').hidden = true; if (!$('modal-backdrop').hidden) return; }
     if (!$('modal-backdrop').hidden || (event.target instanceof Element && event.target.matches('input, textarea, [contenteditable="true"]'))) return;
     if (ctrl && shift && key === 't') { event.preventDefault(); const folder = state.closed.pop(); if (folder) newTab(folder); return; }
     if (ctrl && shift && key === 'w') { event.preventDefault(); window.slate.window('close'); return; }
@@ -397,7 +500,8 @@ function bindControls() {
     if (ctrl && key === 'l') { event.preventDefault(); showAddress(); return; }
     if (ctrl && key === 'r') { event.preventDefault(); refreshAll(); return; }
     if (key === 'f2') { event.preventDefault(); renameSelected(); return; }
-    if (key === 'delete') { event.preventDefault(); deleteSelected(); return; }
+    if (key === 'delete') { event.preventDefault(); deleteSelected(shift); return; }
+    if (event.altKey && (key === 'arrowleft' || key === 'arrowright')) { event.preventDefault(); goHistory(key === 'arrowleft' ? -1 : 1); return; }
     if (key === 'enter' && pane().selected.size === 1) { const item = pane().items.find(x => pane().selected.has(x.path)); if (item) item.directory ? load(state.focused, item.path) : window.slate.open(item.path); return; }
     if (key === 'backspace' || (event.altKey && key === 'arrowup')) { event.preventDefault(); load(state.focused, parentOf(currentPath())); }
   });

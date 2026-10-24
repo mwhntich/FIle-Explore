@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, nativeTheme, net, protocol } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, shell, nativeTheme, net, protocol } = require('electron');
 const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
@@ -90,6 +90,11 @@ function createWindow() {
     window.webContents.on('render-process-gone', (_event, details) => log(`renderer gone: ${JSON.stringify(details)}`));
     window.on('closed', () => log('window closed'));
   }
+  // Mouse back/forward buttons on Windows can arrive as app commands; the renderer de-duplicates them.
+  window.on('app-command', (_event, command) => {
+    if (command === 'browser-backward') window.webContents.send('nav', -1);
+    if (command === 'browser-forward') window.webContents.send('nav', 1);
+  });
   window.loadFile(path.join(__dirname, 'index.html'));
   window.webContents.once('did-finish-load', async () => {
     window.show();
@@ -105,6 +110,8 @@ function createWindow() {
 app.whenReady().then(() => {
   diagnostic('app ready');
   nativeTheme.themeSource = 'dark';
+  // The default menu's Edit accelerators (Ctrl+A/C/X/V) compete with the app's own shortcuts.
+  Menu.setApplicationMenu(null);
   protocol.handle('slate-thumb', request => {
     try {
       const file = decodeURIComponent(new URL(request.url).pathname.slice(1));
@@ -147,6 +154,14 @@ ipcMain.handle('trash', async (_, paths) => {
   const results = [];
   for (const file of paths) {
     try { await shell.trashItem(file); results.push({ file, ok: true }); }
+    catch (error) { results.push({ file, ok: false, error: errorMessage(error) }); }
+  }
+  return results;
+});
+ipcMain.handle('remove', async (_, paths) => {
+  const results = [];
+  for (const file of paths) {
+    try { await fsp.rm(file, { recursive: true, force: false, maxRetries: 2 }); results.push({ file, ok: true }); }
     catch (error) { results.push({ file, ok: false, error: errorMessage(error) }); }
   }
   return results;
